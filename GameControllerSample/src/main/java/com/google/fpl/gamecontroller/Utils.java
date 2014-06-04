@@ -19,31 +19,99 @@ package com.google.fpl.gamecontroller;
 import android.util.Log;
 
 /**
- * A few utility functions.
+ * A few utility functions and classes used by this sample.
  */
 public class Utils {
     /**
-     * Returns a random float between lowerBound and upperBound.
+     * String used to identify log messages from this program.
      */
-    public static float randInRange(float lowerBound, float upperBound) {
-        return (float) (Math.random() * (upperBound - lowerBound) + lowerBound);
+    private static final String LOG_TAG = "GameControllerSample";
+
+    /**
+     * Prints debugging messages to the console.
+     *
+     * Disabled for non-debug builds.
+     *
+     * @param message - The message to print to the console.
+     */
+    public static void logDebug(String message) {
+        if (BuildConfig.DEBUG) {
+            Log.d(LOG_TAG, message);
+        }
     }
 
     /**
-     * Returns a random int between lowerBound and upperBound, inclusive.
+     * Prints an error message to the console.
+     *
+     * Disabled for non-debug builds.
+     *
+     * @param message - The message to print to the console.
      */
-    public static int randIntInRange(int lowerBound, int upperBound) {
-        return (int) (Math.random() * (upperBound - lowerBound + 1) + lowerBound);
+    public static void logError(String message) {
+        if (BuildConfig.DEBUG) {
+            Log.e(LOG_TAG, message);
+        }
     }
 
+    /**
+     * Returns a random floating point value >= lowerBound and < upperBound.
+     */
+    public static float randFloatInRange(float lowerBound, float upperBound) {
+        return (float) (Math.random() * (upperBound - lowerBound) + lowerBound);
+    }
+    /**
+     * Returns a random integer value >= lowerBound and < upperBound.
+     */
+    public static int randIntInRange(int lowerBound, int upperBound) {
+        return (int) randFloatInRange(lowerBound, upperBound);
+    }
+
+    /**
+     * Ensures that the given value falls within the given range.
+     *
+     * @param value - The value to clamp.
+     * @param min - The lower bound of the range.
+     * @param max - The upper bound of the range.
+     * @return - The clamped value.
+     */
     public static float clamp(float value, float min, float max) {
         return Math.max(min, Math.min(max, value));
     }
+    /**
+     * Ensures that the given value falls within the given range.
+     *
+     * @param value - The value to clamp.
+     * @param min - The lower bound of the range.
+     * @param max - The upper bound of the range.
+     * @return - The clamped value.
+     */
     public static float clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 
+    /**
+     * Class for storing and manipulating RGBA colors.
+     *
+     * The color components are stored internally in a 32-bit int, with 8 bits for each
+     * component.
+     *
+     * This class is similar to android.graphics.Color, but differs in 2 main ways:
+     * 1) This class is a container for color data, so it can be instantiated and used as
+     *      data type.  android.graphics.Color is just a set of static functions for packing
+     *      color components into integers.
+     * 2) android.graphics.Color only provides one component packing order, and that order
+     *      does not match what OpenGl/OpenGl ES expects.  This class provides accessors
+     *      to get the colors packed in the order expected by OpenGl/OpenGl ES.
+     */
     public static class Color {
+        // Some common colors for easy reference and readability.  Add more as needed.
+        public static final Color RED = new Color(1.0f, 0.0f, 0.0f);
+        public static final Color GREEN = new Color(0.0f, 1.0f, 0.0f);
+        public static final Color BLUE = new Color(0.0f, 0.0f, 1.0f);
+        public static final Color YELLOW = new Color(1.0f, 1.0f, 0.0f);
+        public static final Color WHITE = new Color(1.0f, 1.0f, 1.0f);
+
+        // Masks and bit locations for each color component.
         private static final int RED_MASK = 0xffffff00;
         private static final int RED_SHIFT = 0;
         private static final int GREEN_MASK = 0xffff00ff;
@@ -53,91 +121,204 @@ public class Utils {
         private static final int ALPHA_MASK = 0x00ffffff;
         private static final int ALPHA_SHIFT = 24;
 
+        /**
+         * The packed color data.
+         *
+         * Alpha is packed into the high-order byte and red is the low-order byte.  This
+         * matches the component packing order used by OpenGl/OpenGl ES.
+         */
         private int mABGR;
 
+        /**
+         * Converts a floating point color value in the range [0..1] to an integer in the
+         * range [0..255].
+         *
+         * @param normalizedColor - A number in the range 0 to 1, inclusive.  No range-checking
+         *                        is performed.
+         * @return - An int in the range 0 to 255, inclusive.
+         */
         private static int normalizedColorToInt(float normalizedColor) {
-            if (clamp(normalizedColor, 0.0f, 1.0f) != normalizedColor) {
-                Log.i("GameControllerSample", "Invalid color component.");
-            }
-            return (int)(255.0f * normalizedColor);
+            return (int) (255.0f * normalizedColor);
         }
+        /**
+         * Converts an integer color value in the range [0..255] to floating point number in the
+         * range [0..1].
+         *
+         * @param intColor - A number in the range 0 to 255, inclusive.  No range-checking
+         *                        is performed.
+         * @return - A float in the range 0 to 1, inclusive.
+         */
         private static float intColorToNormalized(int intColor) {
-            if (clamp(intColor, 0, 255) != intColor) {
-                Log.i("GameControllerSample", "Invalid color component.");
-            }
-            return (float)intColor / 255.0f;
+            return (float) intColor / 255.0f;
         }
 
-        private static int packNormalizedABGR(float red, float green, float blue, float alpha) {
-            return (normalizedColorToInt(red) << RED_SHIFT) |
-                    (normalizedColorToInt(green) << GREEN_SHIFT) |
-                    (normalizedColorToInt(blue) << BLUE_SHIFT) |
-                    (normalizedColorToInt(alpha) << ALPHA_SHIFT);
+        /**
+         * Packs 4 floating point color components into a single 32-bit integer.
+         *
+         * The color components must be in the range 0 to 1, inclusive.
+         */
+        private static int packNormalizedRGBAToABGR(float red, float green, float blue,
+                                                    float alpha) {
+            return packABGR(
+                    normalizedColorToInt(red),
+                    normalizedColorToInt(green),
+                    normalizedColorToInt(blue),
+                    normalizedColorToInt(alpha));
         }
 
+        /**
+         * Packs 4 integer color components into a single 32-bit integer.
+         *
+         * The color components must be in the range 0 to 255, inclusive.
+         */
         private static int packABGR(int red, int green, int blue, int alpha) {
-            if (clamp(alpha, 0, 255) != alpha ||
-                    clamp(blue, 0, 255) != blue ||
-                    clamp(green, 0, 255) != green ||
-                    clamp(red, 0, 255) != red) {
-                Log.i("GameControllerSample", "Invalid color component(s).");
-            }
-
-            return android.graphics.Color.argb(alpha, blue, green, red);
+            return (red << RED_SHIFT)
+                    | (green << GREEN_SHIFT)
+                    | (blue << BLUE_SHIFT)
+                    | (alpha << ALPHA_SHIFT);
         }
+
+        /**
+         * Creates an uninitialized color object.
+         */
         public Color() {}
 
+        /**
+         * Creates a Color object with the given color components.
+         *
+         * Each component must be in the range 0 to 1, inclusive.
+         */
         public Color(float red, float green, float blue, float alpha) {
             set(red, green, blue, alpha);
         }
-
+        /**
+         * Creates a Color object with the given color components and an alpha of 1.0.
+         *
+         * Each component must be in the range 0 to 1, inclusive.
+         */
         public Color(float red, float green, float blue) {
-            mABGR = packNormalizedABGR(red, green, blue, 1.0f);
+            mABGR = packNormalizedRGBAToABGR(red, green, blue, 1.0f);
         }
+
+        /**
+         * Creates a copy of the given color.
+         */
+        public Color(Utils.Color other) {
+            set(other);
+        }
+
+        /**
+         * Sets all of the color components.
+         *
+         * Each component must be in the range 0 to 1, inclusive.
+         */
         public void set(float red, float green, float blue, float alpha) {
-            mABGR = packNormalizedABGR(red, green, blue, alpha);
+            mABGR = packNormalizedRGBAToABGR(red, green, blue, alpha);
         }
+
+        /**
+         * Changes our color to match the given color.
+         */
         public void set(Color other) {
-            mABGR = other.mABGR;
+            this.mABGR = other.mABGR;
         }
+
+        /**
+         * Returns a packed integer representation of this color.
+         *
+         * @return - The 32-bit packed color, with 8 bits per components.  Alpha is in the
+         * high-order bits, then blue, then green, and then red in the low-order bits.
+         */
         public int getPackedABGR() {
             return mABGR;
         }
 
+        /**
+         * Returns the red component of the color as a floating point number in the
+         * range 0 to 1, inclusive.
+         */
         public float red() {
             return intColorToNormalized((mABGR >> RED_SHIFT) & 0xff);
         }
+        /**
+         * Sets the red component of the color.  The given color component must be a
+         * a floating point number in the range 0 to 1, inclusive.
+         */
         public void setRed(float red) {
             mABGR = (mABGR & RED_MASK) | (normalizedColorToInt(red) << RED_SHIFT);
         }
+        /**
+         * Returns the green component of the color as a floating point number in the
+         * range 0 to 1, inclusive.
+         */
         public float green() {
             return intColorToNormalized((mABGR >> GREEN_SHIFT) & 0xff);
         }
+        /**
+         * Sets the green component of the color.  The given color component must be a
+         * a floating point number in the range 0 to 1, inclusive.
+         */
         public void setGreen(float green) {
             mABGR = (mABGR & GREEN_MASK) | (normalizedColorToInt(green) << GREEN_SHIFT);
         }
+        /**
+         * Returns the blue component of the color as a floating point number in the
+         * range 0 to 1, inclusive.
+         */
         public float blue() {
             return intColorToNormalized((mABGR >> BLUE_SHIFT) & 0xff);
         }
+        /**
+         * Sets the blue component of the color.  The given color component must be a
+         * a floating point number in the range 0 to 1, inclusive.
+         */
         public void setBlue(float blue) {
             mABGR = (mABGR & BLUE_MASK) | (normalizedColorToInt(blue) << BLUE_SHIFT);
         }
+        /**
+         * Returns the alpha component of the color as a floating point number in the
+         * range 0 to 1, inclusive.
+         */
         public float alpha() {
             return intColorToNormalized((mABGR >> ALPHA_SHIFT) & 0xff);
         }
+        /**
+         * Sets the alpha component of the color.  The given color component must be a
+         * a floating point number in the range 0 to 1, inclusive.
+         */
         public void setAlpha(float alpha) {
             mABGR = (mABGR & ALPHA_MASK) | (normalizedColorToInt(alpha) << ALPHA_SHIFT);
         }
 
-        public void scale(float redScale, float greenScale, float blueScale, float alphaScale) {
-            set(red() * redScale, green() * greenScale, blue() * blueScale, alpha() * alphaScale);
+        /**
+         * Changes this color by multiplying each color component by the given factor.
+         *
+         * The alpha component of the color remains unchanged.
+         *
+         * @param factor - A value in the range 0..1, inclusive, to indicate how much darkening
+         *               to apply.  0 sets the color to black, and 1 leaves the color unchanged.
+         *               Values outside of this range have undefined results.
+         */
+        public void darken(float factor) {
+            set(red() * factor, green() * factor, blue() * factor, alpha());
         }
 
-        public void setToLerp(Color colorA, Color colorB, float x) {
-            set(colorA.red() * x + colorB.red() * (1.0f - x),
-                    colorA.green() * x + colorB.green() * (1.0f - x),
-                    colorA.blue() * x + colorB.blue() * (1.0f - x),
-                    colorA.alpha() * x + colorB.alpha() * (1.0f - x));
+        /**
+         * Sets this color to a color computed by interpolating between two other colors.
+         *
+         * The interpolated color is created by linearly interpolating each component
+         * of the two given colors.
+         *
+         * @param colorA - The first color to mix.
+         * @param colorB - The second color to mix.
+         * @param factor - A value between 0 and 1.  A value of "0" will set this color to
+         *               colorA, and a value of "1" will set this color to colorB.
+         */
+        public void setToLerp(Color colorA, Color colorB, float factor) {
+            set(colorA.red() * factor + colorB.red() * (1.0f - factor),
+                    colorA.green() * factor + colorB.green() * (1.0f - factor),
+                    colorA.blue() * factor + colorB.blue() * (1.0f - factor),
+                    colorA.alpha() * factor + colorB.alpha() * (1.0f - factor));
         }
     }
 }
