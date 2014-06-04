@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 The Android Open Source Project
+ * Copyright 2014 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,150 +24,228 @@ import com.google.fpl.gamecontroller.Utils;
  * Base class used to handle particle effects.
  */
 public class BaseParticle {
-    public static final int PARTICLETYPE_NORMAL = 0;
-    public static final int PARTICLETYPE_ROCKET = 1;
-    private static final float[] SQUARE_SHAPE = {
-            1, 1,
-            -1, 1,
-            1, -1,
-            -1, -1
-    };
-    public static final float FADE_TIME = 60f;
-    public static final float FADE_DELTA = 1f / FADE_TIME;
-    public float rotation = 0;
-    public float deltaRotation = 0;
-    public float x, y;
-    public float deltaX, deltaY;
-    public float size;
-    public final Utils.Color color = new Utils.Color();
-    public float maxAlpha = 1;
-    public float aspectRatio = 1f;
-    public int ownerIndex = -1;
-    public boolean dieOffscreen = true;
-    public float fuse = 0;
-    public boolean rotateToHeading = false;
-    public int particleType;
+    public static final int PARTICLE_TYPE_NORMAL = 0;
+    // Rocket particles have different collision behavior, produce a trail of exhaust, and
+    // have an acceleration.
+    public static final int PARTICLE_TYPE_ROCKET = 1;
+
+    // Particles fade in and out over a 1 second period.
+    private static final float FADE_FRAME_COUNT = GameState.secondsToFrameDelta(1.0f);
+    private static final float FADE_DELTA_PER_FRAME = 1.0f / FADE_FRAME_COUNT;
+
+    // The max velocity of rocket particles.
+    private static final float ROCKET_MAX_SPEED_SQUARED = 6.0f * 6.0f;
+    // Rocket acceleration per frame (expressed as a percentage increase increase over the
+    // rocket's current speed).
+    private static final float ROCKET_ACCELERATION = 0.05f;
+
+    // Particles with an active frame count of 0 are not drawn or updated.
+    private float mActiveFrameCountRemaining = 0.0f;
+
+    // Either PARTICLE_TYPE_NORMAL or PARTICLE_TYPE_ROCKET.
+    private int mParticleType;
+    // Screen-space position of the center of the particle.
+    private float mPositionX, mPositionY;
+    // The distance this particle moves each frame.
+    private float mVelocityX, mVelocityY;
+    // Scales the coordinates Utils.SQUARE_SHAPE to create larger or smaller particles.
+    private float mSize;
+    // The color of the particle.
+    private final Utils.Color mColor = new Utils.Color();
+    // A value between 0 and 1 used to scale the alpha value of the color.  As particles fade
+    // in and out, the alpha value in mColor changes.  When a particle is not in the process of
+    // fading, its transparency will be set to mMaxAlpha.
+    private float mMaxAlpha;
+    // The ratio of the particle's width to height.  Particles that have an aspect ratio other
+    // than 1.0 will automatically rotate to point in the direction they are traveling.
+    private float mAspectRatio;
+    // The id of the Spaceship that owns this particle.  Used for bullet particles to award
+    // points.
+    private int mOwnerId;
+    // If true, the particle will become inactive as soon as its center passes outside the
+    // bounds of the world.
+    private boolean mDieOffscreen;
 
     private final Utils.Color mCurrentColor = new Utils.Color();
 
-    public void update(float timeFactor) {
-        rotation += deltaRotation;
-        x += deltaX * timeFactor;
-        y += deltaY * timeFactor;
-        fuse -= timeFactor;
-
-        float newAlpha = color.alpha();
-        if (fuse < FADE_TIME) {
-            newAlpha -= FADE_DELTA * timeFactor;
-        } else {
-            newAlpha += FADE_DELTA * timeFactor;
-        }
-        color.setAlpha(Utils.clamp(newAlpha, 0.0f, 1.0f));
-
-        if (dieOffscreen) {
-            if (Math.abs(x) > 250 || Math.abs(y) > 150) {
-                fuse = 0;
-            }
-        }
-        if (particleType == PARTICLETYPE_ROCKET) {
-            handleRocketUpdate();
-        }
+    /**
+     * Returns a particle to its default state.
+     *
+     * This function is called to initialize newly spawned particles.
+     *
+     * @param lifetimeFrameCount the total number of frames this particle will be active.
+     */
+    public void reset(float lifetimeFrameCount) {
+        this.mActiveFrameCountRemaining = lifetimeFrameCount;
+        this.mParticleType = PARTICLE_TYPE_NORMAL;
+        this.mPositionX = 0.0f;
+        this.mPositionY = 0.0f;
+        this.mVelocityX = 0.0f;
+        this.mVelocityY = 0.0f;
+        this.mSize = 1.0f;
+        this.mColor.set(1.0f, 1.0f, 1.0f, 1.0f);
+        this.mMaxAlpha = 1.0f;
+        this.mAspectRatio = 1.0f;
+        this.mOwnerId = GameState.INVALID_PLAYER_ID;
+        this.mDieOffscreen = true;
+        // Set newly created particles to be transparent so that particles will not be visible
+        // until they have had update() called on them.  This avoids ordering issues that can
+        // occur when particles are created during the update phase of the frame.
+        this.mCurrentColor.setAlpha(0.0f);
     }
 
-    protected void handleRocketUpdate() {
-        if (Math.abs(x) > GameState.WORLD_WIDTH / 2 || Math.abs(y) > GameState.WORLD_HEIGHT / 2) {
-            collision();
-        }
-        float currentSpeedSquared = deltaX * deltaX + deltaY * deltaY;
-        if (currentSpeedSquared <= 6 * 6) {
-            deltaX *= 1.05f;
-            deltaY *= 1.05f;
+    public void setParticleType(int particleType) {
+        this.mParticleType = particleType;
+    }
+
+    public void setPosition(float x, float y) {
+        this.mPositionX = x;
+        this.mPositionY = y;
+    }
+    public float getPositionX() {
+        return mPositionX;
+    }
+    public float getPositionY() {
+        return mPositionY;
+    }
+
+    public void setSpeed(float speedX, float speedY) {
+        this.mVelocityX = speedX;
+        this.mVelocityY = speedY;
+    }
+
+    public void setSize(float size) {
+        this.mSize = size;
+    }
+    public float getSize() {
+        return mSize;
+    }
+
+    public void setColor(Utils.Color color) {
+        this.mColor.set(color);
+    }
+    public Utils.Color getColor() {
+        return mColor;
+    }
+
+    public void setMaxAlpha(float maxAlpha) {
+        this.mMaxAlpha = maxAlpha;
+    }
+
+    public void setAspectRatio(float aspectRatio) {
+        this.mAspectRatio = aspectRatio;
+    }
+
+    public void setOwnerId(int ownerId) {
+        this.mOwnerId = ownerId;
+    }
+    public int getOwnerId() {
+        return mOwnerId;
+    }
+
+    public void setDieOffscreen(boolean dieOffscreen) {
+        this.mDieOffscreen = dieOffscreen;
+    }
+
+    public void update(float frameDelta) {
+        if (!isActive()) {
+            return;
         }
 
-        BaseParticle mySquare = GameState.getInstance().getExplosions().addParticle(
-                x - deltaX * 2,
-                y - deltaY * 2,
-                -deltaX / 2f + (float) Math.random() * 0.2f - 0.1f,
-                -deltaY / 2f + (float) Math.random() * 0.2f - 0.1f,
-                color,                           // color
-                (float) Math.random() * 45 + 15, // fuse
-                (float) Math.random() * 1 + 1    // size
-        );
-        if (mySquare != null) {
-            mySquare.maxAlpha = 0.25f;
+        incrementPosition(frameDelta);
+        mActiveFrameCountRemaining -= frameDelta;
+
+        // Update the particle's alpha every frame.
+        float newAlpha = mColor.alpha();
+        if (mActiveFrameCountRemaining < FADE_FRAME_COUNT) {
+            // Particles that are about to die will fade out.
+            newAlpha -= FADE_DELTA_PER_FRAME * frameDelta;
+        } else {
+            // Newly created particles fade in.
+            newAlpha += FADE_DELTA_PER_FRAME * frameDelta;
         }
+        mColor.setAlpha(Utils.clamp(newAlpha, 0.0f, 1.0f));
+
+        if (mDieOffscreen) {
+            if (!GameState.inWorld(mPositionX, mPositionY)) {
+                // The particle is outside the screen, so kill it.
+                mActiveFrameCountRemaining = 0.0f;
+            }
+        }
+        // Special update for rockets.
+        if (mParticleType == PARTICLE_TYPE_ROCKET) {
+            handleRocketUpdate(frameDelta);
+        }
+
+        mCurrentColor.set(mColor);
+        mCurrentColor.setAlpha(mCurrentColor.alpha() * mMaxAlpha);
+    }
+
+    protected void handleRocketUpdate(float frameDelta) {
+        float clampedX = Utils.clamp(mPositionX, GameState.MAP_LEFT_COORDINATE,
+                GameState.MAP_RIGHT_COORDINATE);
+        float clampedY = Utils.clamp(mPositionY, GameState.MAP_BOTTOM_COORDINATE,
+                GameState.MAP_TOP_COORDINATE);
+        if (clampedX != mPositionX || clampedY != mPositionY) {
+            // The rocket hit the edge of the map, so make it explode.
+            mPositionX = clampedX;
+            mPositionY = clampedY;
+            handleCollision();
+        }
+
+        // The rocket particle will accelerate up to a maximum speed.
+        float currentSpeedSquared = Utils.vector2DLengthSquared(mVelocityX, mVelocityY);
+        if (currentSpeedSquared <= ROCKET_MAX_SPEED_SQUARED) {
+            mVelocityX *= ROCKET_ACCELERATION * frameDelta + 1.0f;
+            mVelocityY *= ROCKET_ACCELERATION * frameDelta + 1.0f;
+        }
+
+        // Create a particle trail (exhaust) behind the rocket.
+        GameState.getInstance().getExplosions().spawnExhaustTrail(
+                mPositionX, mPositionY,
+                mVelocityX, mVelocityY,
+                mColor, 1);
+    }
+
+    /**
+     * Advance the particle's position by the given number of frames.
+     */
+    public void incrementPosition(float frameDelta) {
+        mPositionX += mVelocityX * frameDelta;
+        mPositionY += mVelocityY * frameDelta;
     }
 
     public void draw(ShapeBuffer sb) {
-        float hx = 0, hy = 0;
-        if (rotateToHeading) {
-            hx = deltaX;
-            hy = deltaY;
+        float headingX = 0.0f, headingY = 0.0f;
+        if (mAspectRatio != 1.0f) {
+            // Non-square particles point in the direction they are moving.
+            headingX = mVelocityX;
+            headingY = mVelocityY;
         }
 
-        mCurrentColor.set(color);
-        mCurrentColor.setAlpha(mCurrentColor.alpha() * maxAlpha);
-        sb.addShape(x, y, mCurrentColor, SQUARE_SHAPE, size * aspectRatio, size, hx, hy);
+        sb.add2DShape(
+                mPositionX, mPositionY,
+                mCurrentColor,
+                Utils.SQUARE_SHAPE,
+                mSize * mAspectRatio, mSize,
+                headingX, headingY);
     }
 
-    public void collision() {
-        fuse = 0;
-        if (particleType == PARTICLETYPE_ROCKET) {
-            for (int i = 0; i < 100; i++) {
-                float xx, yy;
-                xx = Utils.randInRange(-1, 1);
-                yy = Utils.randInRange(-1, 1);
-                float mag = (float) Math.sqrt(xx * xx + yy * yy);
-                if (mag == 0) {
-                    mag = 1;
-                    xx = 1;
-                }
-                float speed = Utils.randInRange(0.5f, 1.5f) / mag;
-
-                BaseParticle myShot = GameState.getInstance().getShots().addParticle(
-                        x, y,                        // position
-                        xx * speed, yy * speed,      // dx/dy
-                        color,                       // color
-                        Utils.randIntInRange(5, 45), //fuse
-                        0.75f                        //size
-                );
-                if (myShot != null) {
-                    if (myShot != null) {
-                        myShot.x += myShot.deltaX * 3;
-                        myShot.y += myShot.deltaY * 3;
-                        myShot.aspectRatio = 3f;
-                        myShot.rotateToHeading = true;
-                        myShot.ownerIndex = ownerIndex;
-                    }
-                }
-            }
+    public void handleCollision() {
+        if (mParticleType == PARTICLE_TYPE_ROCKET) {
+            // Add the shrapnel particles to the "shots" layer so that they will be checked
+            // for collisions with other players.
+            GameState.getInstance().getShots().spawnShrapnelExplosion(mPositionX, mPositionY,
+                    mColor, 0.5f, 1.5f, mOwnerId, 100);
         } else {
-            for (int i = 0; i < 5; i++) {
-                float xx, yy;
-                xx = Utils.randInRange(-1, 1);
-                yy = Utils.randInRange(-1, 1);
-                float mag = (float) Math.sqrt(xx * xx + yy * yy);
-                if (mag == 0) {
-                    mag = 1;
-                    xx = 1;
-                }
-                float speed = Utils.randInRange(0.1f, 0.5f) / mag;
-
-                BaseParticle mySquare = GameState.getInstance().getExplosions().addParticle(
-                        x, y,                                  //position
-                        1.5f * xx * speed, 1.5f * yy * speed,  //dx/dy
-                        color,                                 //color
-                        Utils.randInRange(10, 20),             //fuse
-                        Utils.randInRange(0.5f, 2)             //size
-                );
-                if (mySquare != null) {
-                    mySquare.maxAlpha = 0.25f;
-                }
-            }
+            // Create a little bit of "smoke" when the particle hits something.
+            GameState.getInstance().getExplosions().spawnRingBurst(mPositionX, mPositionY, mColor,
+                    0.15f, 0.75f, 5);
         }
+        mActiveFrameCountRemaining = 0.0f;
     }
 
     public boolean isActive() {
-        return fuse > 0;
+        return mActiveFrameCountRemaining > 0.0f;
     }
 }
