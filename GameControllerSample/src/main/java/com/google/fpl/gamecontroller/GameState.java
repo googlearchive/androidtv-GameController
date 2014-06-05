@@ -23,13 +23,10 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLSurfaceView.Renderer;
 import android.opengl.Matrix;
-import android.util.Log;
 import android.view.InputDevice;
 import android.view.InputEvent;
-import android.view.MotionEvent;
 
 import com.google.fpl.gamecontroller.particles.Background;
-import com.google.fpl.gamecontroller.particles.BaseParticle;
 import com.google.fpl.gamecontroller.particles.ParticleGlitter;
 
 import javax.microedition.khronos.egl.EGLConfig;
@@ -40,76 +37,126 @@ import javax.microedition.khronos.opengles.GL10;
  */
 public class GameState extends GLSurfaceView implements Renderer, InputDeviceListener {
 
-    public static final int WORLD_WIDTH = 340;
-    public static final int WORLD_HEIGHT = 180;
+    // The "world" is everything that is visible on the screen.  The world extends to the outside
+    // edges of the walls that surround the world.
+    public static final int WORLD_WIDTH = 1280 / 4;
+    public static final int WORLD_HEIGHT = 720 / 4;
+    // Define the rectangle that bounds the world.  The coordinate system used by the world
+    // is centered around 0, 0.
+    public static final int WORLD_TOP_COORDINATE = WORLD_HEIGHT / 2;
+    public static final int WORLD_BOTTOM_COORDINATE = -WORLD_HEIGHT / 2;
+    public static final int WORLD_LEFT_COORDINATE = -WORLD_WIDTH / 2;
+    public static final int WORLD_RIGHT_COORDINATE = WORLD_WIDTH / 2;
 
-    protected static final float  MS_PER_FRAME = 1000 / 60;
-    protected static final int MAX_PLAYERS = 4;
-    protected static final int MAX_POWERUPS = 2;
-    protected static final Utils.Color PLAYER_COLORS[] = new Utils.Color[] {
-            new Utils.Color(1.0f, 0.0f, 0.0f),
-            new Utils.Color(0.0f, 1.0f, 0.0f),
-            new Utils.Color(1.0f, 1.0f, 0.0f),
-            new Utils.Color(0.0f, 0.0f, 1.0f),
-            new Utils.Color(1.0f, 1.0f, 1.0f)
+    // Mapping for Z values when projected into the world.
+    private static final float WORLD_NEAR_PLANE = -1.0f;
+    private static final float WORLD_FAR_PLANE = 1.0f;
+    private static final float WORLD_ASPECT_RATIO = (float) WORLD_WIDTH / (float) WORLD_HEIGHT;
+
+    // The thickness of the walls that bound the world.
+    private static final int MAP_WALL_THICKNESS = 20;
+
+    // The "map" is the area where ships can move.  The map is bounded by the inside edges of
+    // that walls that surround the world.
+    public static final int MAP_WIDTH = WORLD_WIDTH - 2 * MAP_WALL_THICKNESS;
+    public static final int MAP_HEIGHT = WORLD_HEIGHT - 2 * MAP_WALL_THICKNESS;
+    // Define the rectangle that bounds the map.  The map and the world share the same coordinate
+    // system centered at 0, 0.
+    public static final int MAP_TOP_COORDINATE = MAP_HEIGHT / 2;
+    public static final int MAP_BOTTOM_COORDINATE = -MAP_HEIGHT / 2;
+    public static final int MAP_LEFT_COORDINATE = -MAP_WIDTH / 2;
+    public static final int MAP_RIGHT_COORDINATE = MAP_WIDTH / 2;
+
+    // Set to "true" to print info about every controller event.
+    private static final boolean CONTROLLER_DEBUG_PRINT = false;
+
+    // An arbitrary frame-rate used to compute the "frameDelta" value that is passed to
+    // update and other functions that require a time delta.  This frame-rate does not have
+    // any relationship to the actual rate at which the screen refreshes.
+    // See onDrawFrame() and update() for more info on how this value is used.
+    private static final float ANIMATION_FRAMES_PER_SECOND = 60.0f;
+
+    // The maximum number of controllers supported by this game.
+    private static final int MAX_PLAYERS = 4;
+
+    // The number of "power-ups" to draw on the map.
+    private static final int MAX_POWERUPS = 2;
+
+    // The first player to join is red, second is green, etc.
+    private static final Utils.Color PLAYER_COLORS[] = new Utils.Color[] {
+            Utils.Color.RED,
+            Utils.Color.GREEN,
+            Utils.Color.YELLOW,
+            Utils.Color.BLUE
     };
 
-    protected final float[] mMVPMatrix = new float[16];
-    protected final float[] mProjMatrix = new float[16];
-    protected final ViewportLocation[][] mCameraLocations = {
-            // Zero players, still one camera...
-            {
-                    new ViewportLocation(0.0f, 0.0f, 1.0f, 1.0f),
-            },
-            {
-                    new ViewportLocation(0.0f, 0.0f, 1.0f, 1.0f),
-            },
-            {
-                    new ViewportLocation(0.0f, 0.0f, 0.5f, 1.0f),
-                    new ViewportLocation(0.5f, 0.0f, 0.5f, 1.0f),
-            },
-            {
-                    new ViewportLocation(0.0f, 0.0f, 0.5f, 0.5f),
-                    new ViewportLocation(0.0f, 0.5f, 0.5f, 0.5f),
-                    new ViewportLocation(0.5f, 0.0f, 0.5f, 1.0f),
-            },
-            {
-                    new ViewportLocation(0.0f, 0.0f, 0.5f, 0.5f),
-                    new ViewportLocation(0.5f, 0.0f, 0.5f, 0.5f),
-                    new ViewportLocation(0.0f, 0.5f, 0.5f, 0.5f),
-                    new ViewportLocation(0.5f, 0.5f, 0.5f, 0.5f)
-            }
-    };
+    // The number of points a player must score to win a match.
+    private static final int POINTS_PER_MATCH = 5;
 
+    // Singleton instance of the GameState.
     private static GameState sGameStateInstance = null;
-    protected float mWindowWidth, mWindowHeight;
-    protected Spaceship[] mPlayerList;
-    protected Background mBackground;
-    protected ParticleGlitter mShots;
 
-    protected ParticleGlitter mExplosions;
-    protected WallSegment[] mWallList;
-    protected float mBackgroundResetCounter = 0;
+    // The combined model, view, and projection matrices.
+    private final float[] mMVPMatrix = new float[16];
+
+    // The window dimensions in pixels.
+    private int mWindowWidth, mWindowHeight;
+
+    // One Spaceship per controller.
+    private Spaceship[] mPlayerList;
+
+    // The animated background particles.
+    private Background mBackground;
+
+    // Manages the shots fired by the ships.
+    private ParticleGlitter mShots;
+
+    // Manages explosion particles.
+    private ParticleGlitter mExplosions;
+
+    // The walls and other obstacles in the world.
+    private WallSegment[] mWallList;
+
+    // All geometry for the frame goes into a single ShapeBuffer.
+    private ShapeBuffer mShapeBuffer = null;
+
+    // The list of power ups shown on the map.
+    private PowerUp[] mPowerupList;
+
+    // The system time (in milliseconds) of the last frame update.
+    private long mLastUpdateTimeMillis;
 
     /**
-     * The Activity Context
+     * @return The global GameState object.
      */
-    private Context mContext;
-    private ShapeBuffer mShapeBuffer = null;
-    private PowerUp[] mPowerupList;
-    private GamepadController[] mGamepadControllerList;
-    private long mLastUpdateTime;
+    public static GameState getInstance() {
+        return sGameStateInstance;
+    }
+
+    /**
+     * Converts a duration in seconds to a duration in number of elapsed frames.
+     */
+    public static float secondsToFrameDelta(float seconds) {
+        return seconds * ANIMATION_FRAMES_PER_SECOND;
+    }
+    /**
+     * Converts a duration in milliseconds to a duration in number of elapsed frames.
+     */
+    public static float millisToFrameDelta(long milliseconds) {
+        return secondsToFrameDelta((float) milliseconds / 1000.0f);
+    }
 
     /**
      * Set this class as renderer for this GLSurfaceView.
      * Request Focus and set if focusable in touch mode to
      * receive the Input from Screen
      *
-     * @param context - The Activity Context
+     * @param context - The Activity Context.
      */
     public GameState(Context context) {
         super(context);
         sGameStateInstance = this;
+
         // Request GL ES 2.0 context.
         setEGLContextClientVersion(2);
         // Set this as Renderer.
@@ -117,11 +164,15 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
         // Request focus.
         this.requestFocus();
         this.setFocusableInTouchMode(true);
-        this.mContext = context;
 
+        // Create the lists of players and power-ups.
         mPlayerList = new Spaceship[MAX_PLAYERS];
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            mPlayerList[i] = new Spaceship(this, PLAYER_COLORS[i]);
+        for (int i = 0; i < mPlayerList.length; i++) {
+            mPlayerList[i] = new Spaceship(this, i, PLAYER_COLORS[i]);
+        }
+        mPowerupList = new PowerUp[MAX_POWERUPS];
+        for (int i = 0; i < mPowerupList.length; i++) {
+            mPowerupList[i] = new PowerUp();
         }
 
         mBackground = new Background();
@@ -130,333 +181,371 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
         // The true here means we want collision tracking data.
         mShots = new ParticleGlitter(true);
 
-        mLastUpdateTime = System.currentTimeMillis();
+        mLastUpdateTimeMillis = System.currentTimeMillis();
 
-        InputManager inputManager = (InputManager) context.getSystemService("input");
+        InputManager inputManager = (InputManager) context.getSystemService(Context.INPUT_SERVICE);
         inputManager.registerInputDeviceListener(this, null);
 
-        mWallList = new WallSegment[]{
-                new WallSegment(40, 80, 20, 60),
-                new WallSegment(-40, -80, 20, 60),
-
-
-                new WallSegment(80, -50, 20, 20),
-                new WallSegment(-80, 50, 20, 20),
-                new WallSegment(110, 30, 20, 20),
-                new WallSegment(-110, -30, 20, 20),
-                new WallSegment(0, 0, 60, 20),
-
-
-                // World boundaries:
-                new WallSegment(0, WORLD_HEIGHT / 2 + 10, WORLD_WIDTH + 40, 20),
-                new WallSegment(0, -WORLD_HEIGHT / 2 - 10, WORLD_WIDTH + 40, 20),
-                new WallSegment(WORLD_WIDTH / 2 + 10, 0, 20, WORLD_HEIGHT + 40),
-                new WallSegment(-WORLD_WIDTH / 2 - 10, 0, 20, WORLD_HEIGHT + 40),
-        };
-
-        mPowerupList = new PowerUp[MAX_POWERUPS];
-        for (int i = 0; i < MAX_POWERUPS; i++) {
-            mPowerupList[i] = new PowerUp();
-        }
+        buildMap();
     }
 
-    public static GameState getInstance() {
-        return sGameStateInstance;
+    /* ***** Listener Events ***** */
+    @Override
+    public void onInputDeviceAdded(int arg0) {
+        Utils.logDebug("Device added: " + arg0);
+    }
+
+    @Override
+    public void onInputDeviceChanged(int arg0) {
+        Utils.logDebug("Device changed: " + arg0);
+    }
+
+    @Override
+    public void onInputDeviceRemoved(int arg0) {
+        Utils.logDebug("Device removed: " + arg0);
+        // Deactivate a player when their corresponding input device is removed.
+        for (Spaceship player : mPlayerList) {
+            if (player.isActive() && player.getController().getDeviceId() == arg0) {
+                Utils.logDebug("Deactivated player: " + arg0);
+                player.deactivateShip();
+            }
+        }
     }
 
     public ParticleGlitter getShots() {
         return mShots;
     }
-
     public ParticleGlitter getExplosions() {
         return mExplosions;
+    }
+    public Background getBackgroundParticles() {
+        return mBackground;
+    }
+    public Spaceship[] getPlayerList() {
+        return mPlayerList;
+    }
+    public WallSegment[] getWallList() {
+        return mWallList;
     }
 
     /**
      * The Surface is created/init()
      */
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
-        //Settings
-        // Set the background frame color
-        GLES20.glClearColor(0.5f, 0.0f, 0.0f, 1.0f);
-
-        float aspectRatio = mWindowWidth / mWindowHeight;
-        Matrix.orthoM(mMVPMatrix, 0, -100 * aspectRatio, 100 * aspectRatio, -100, 100, -1, 1);
-
+        // The ShapeBuffer creates OpenGl resources, so don't create it until after the
+        // primary rendering surface has been created.
         mShapeBuffer = new ShapeBuffer();
+        mShapeBuffer.loadResources();
     }
-
-    /* ***** Listener Events ***** */
 
     /**
      * Here we do our drawing
      */
     public void onDrawFrame(GL10 unused) {
+        // Clear the screen to black.
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
-        float aspectRatio = mWindowWidth / mWindowHeight;
-        Matrix.orthoM(mMVPMatrix, 0, -100 * aspectRatio, 100 * aspectRatio, -100, 100, -1, 1);
-
-        if (mShapeBuffer == null) {
+        // Don't try to draw if the shape buffer failed to initialize.
+        if (!mShapeBuffer.isInitialized()) {
             return;
         }
 
-        long currentTime = System.currentTimeMillis();
-        float timeFactor = (float) (currentTime - mLastUpdateTime) / MS_PER_FRAME;
-        update(timeFactor);
+        long currentTimeMillis = System.currentTimeMillis();
+
+        // Compute frame delta.  frameDelta = # of "ideal" frames that have occurred since the
+        // last update.  "ideal" assumes a constant frame-rate (60 FPS or 16.7 milliseconds per
+        // frame).  Since the delta doesn't depend on the "real" frame-rate, the animations always
+        // run at the same wall clock speed, regardless of what the real refresh rate is.
+        //
+        // frameDelta was used instead of a time delta in order to make the values passed
+        // to update easier to understand when debugging the code.  For example, a frameDelta
+        // of "1.5" means that one and a half hypothetical frames have passed since the last
+        // update.  In wall time this would be 25 milliseconds or 0.025 seconds.
+        float frameDelta = millisToFrameDelta(currentTimeMillis - mLastUpdateTimeMillis);
+
+        update(frameDelta);
         draw();
-        mLastUpdateTime = currentTime;
+        mLastUpdateTimeMillis = currentTimeMillis;
     }
 
     /**
-     * If the surface changes, reset the view
+     * If the surface changes, reset the view size.
      */
     public void onSurfaceChanged(GL10 unused, int width, int height) {
-        if (height == 0) {
-            // Prevent a divide by zero.
-            height = 1;
-        }
-        mWindowWidth = width;
-        mWindowHeight = height;
+        // Make sure the window dimensions are never 0.
+        mWindowWidth = Math.max(width, 1);
+        mWindowHeight = Math.max(height, 1);
     }
 
     /**
-     * Override the touch screen listener.
-     * <p/>
-     * React to moves and presses on the touchscreen.
+     * Indicate that the given player has scored a point.
+     *
+     * Will end the match if the scoring player has enough points to win.
+     *
+     * @param playerId - the id of the scoring player.
      */
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        //We handled the event
-        return true;
-    }
-
-    public void scorePoint(int playerID) {
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (mPlayerList[i].isActive && mPlayerList[i].shipIndex == playerID) {
-                mPlayerList[i].pointsEarned++;
-                if (mPlayerList[i].pointsEarned >= 5) {
-                    Log.i("GameControllerSample", "Match over! - Player " + playerID + " has " +
-                            mPlayerList[i].pointsEarned + " points!");
-                    for (int j = 0; j < MAX_PLAYERS; j++) {
-                        if (mPlayerList[j].isActive && mPlayerList[j].shipIndex != playerID) {
-                            mPlayerList[j].explodeForMatchEnd();
-                        }
-                    }
-                    mPlayerList[i].pointsEarned = 0;
-                    mBackground.transitionColorTo(mPlayerList[i].getColor(), 60 * 1.5f);
-                    mBackgroundResetCounter = 60 * 4;
+    public void scorePoint(int playerId) {
+        for (Spaceship player : mPlayerList) {
+            if (player.isActive() && player.getPlayerId() == playerId) {
+                player.changeScore(1);
+                // See if the scoring player has enough points to win the match.
+                if (player.getScore() >= POINTS_PER_MATCH) {
+                    endMatch(player);
                 }
             }
         }
     }
 
-    protected void ringBurst(float x, float y, Utils.Color color, float minSpeed,
-                             float maxSpeed, int count) {
-        for (int i = 0; i < count; i++) {
-            float xx, yy;
-            xx = Utils.randInRange(-1, 1);
-            yy = Utils.randInRange(-1, 1);
-            float mag = (float) Math.sqrt(xx * xx + yy * yy);
-            if (mag == 0) {
-                mag = 1;
-                xx = 1;
-            }
-            float speed = Utils.randInRange(minSpeed, maxSpeed) / mag;
-
-            BaseParticle mySquare = mExplosions.addParticle(
-                    x, y,                                  //position
-                    1.5f * xx * speed, 1.5f * yy * speed,  //dx/dy
-                    color,                                 //color
-                    Utils.randInRange(15, 45),             //fuse
-                    Utils.randInRange(0.5f, 2)             //size
-            );
-            if (mySquare != null) {
-                mySquare.maxAlpha = 0.25f;
-            }
-        }
-    }
-
-    public boolean handleInputEvent(InputEvent e) {
+    /**
+     * Handles game controller input.
+     *
+     * Events that do not come from game controllers are ignored.  Game controller events
+     * are routed to the correct player's controller object.
+     *
+     * @param event - The InputEvent to handle.
+     * @return - true if the event was handled.
+     */
+    public boolean handleInputEvent(InputEvent event) {
         boolean wasHandled = false;
-        int ledNumber = InputDevice.getDevice(e.getDeviceId()).getControllerNumber() - 1;
-        Log.v("GameControllerSample", "----------------------------------------------");
-        Log.v("GameControllerSample", "Input event: ");
-        Log.v("GameControllerSample", "Source: " + e.getSource());
-        Log.v("GameControllerSample", "isFromSource(gamepad): " +
-                e.isFromSource(InputDevice.SOURCE_GAMEPAD));
-        Log.v("GameControllerSample", "isFromSource(joystick): " +
-                e.isFromSource(InputDevice.SOURCE_JOYSTICK));
-        Log.v("GameControllerSample", "isFromSource(touch nav): " +
-                e.isFromSource(InputDevice.SOURCE_TOUCH_NAVIGATION));
-        Log.v("GameControllerSample", "LED: " + ledNumber);
-        Log.v("GameControllerSample", "----------------------------------------------");
 
-        if (ledNumber != -1) {
-            mPlayerList[ledNumber].makeActiveIfNotActive();
-            mPlayerList[ledNumber].deviceId = e.getDeviceId();
-            mPlayerList[ledNumber].getController().handleInputEvent(e);
+        // getControllerNumber() will return "0" for devices that are not game controllers or
+        // joysticks.
+        int controllerNumber = InputDevice.getDevice(event.getDeviceId()).getControllerNumber() - 1;
+
+        if (CONTROLLER_DEBUG_PRINT) {
+            Utils.logDebug("----------------------------------------------");
+            Utils.logDebug("Input event: ");
+            Utils.logDebug("Source: " + event.getSource());
+            Utils.logDebug("isFromSource(gamepad): "
+                    + event.isFromSource(InputDevice.SOURCE_GAMEPAD));
+            Utils.logDebug("isFromSource(joystick): "
+                    + event.isFromSource(InputDevice.SOURCE_JOYSTICK));
+            Utils.logDebug("isFromSource(touch nav): "
+                    + event.isFromSource(InputDevice.SOURCE_TOUCH_NAVIGATION));
+            Utils.logDebug("Controller: " + controllerNumber);
+            Utils.logDebug("----------------------------------------------");
+        }
+
+        if (controllerNumber >= 0 && controllerNumber < mPlayerList.length) {
+            mPlayerList[controllerNumber].makeActiveIfNotActive(event.getDeviceId());
+            mPlayerList[controllerNumber].getController().handleInputEvent(event);
             wasHandled = true;
+        } else {
+            Utils.logDebug("Unhandled input event.");
         }
         return wasHandled;
     }
 
-    public void update(float timeFactor) {
-        mBackground.update(timeFactor);
-        mExplosions.update(timeFactor);
-        mShots.update(timeFactor);
+    /**
+     * Update positions, animations, etc.
+     *
+     * @param frameDelta - The amount of time (in "frame units") that has elapsed since the last
+     *                   call to update().
+     */
+    public void update(float frameDelta) {
+        mBackground.update(frameDelta);
+        mExplosions.update(frameDelta);
+        mShots.update(frameDelta);
 
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (mPlayerList[i].isActive) {
-                mPlayerList[i].update(timeFactor);
+        for (Spaceship player : mPlayerList) {
+            // Only update the active players.
+            if (player.isActive()) {
+                player.update(frameDelta);
             }
         }
 
-        for (int i = 0; i < mWallList.length; i++) {
-            mWallList[i].update(timeFactor);
+        for (WallSegment wall : mWallList) {
+            wall.update(frameDelta);
         }
-        for (int i = 0; i < mPowerupList.length; i++) {
-            mPowerupList[i].update(timeFactor);
-        }
-
-        // Important - make sure this is last, so we can identify presses/releases correctly.
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            mPlayerList[i].getController().advanceFrame();
-        }
-
-        if (mBackgroundResetCounter > 0) {
-            mBackgroundResetCounter -= timeFactor;
-            if (mBackgroundResetCounter <= 0) {
-                mBackgroundResetCounter = 0;
-                mBackground.transitionColorTo(new Utils.Color(0.0f, 0.0f, 0.5f, 1.0f), 60 * 1.5f);
-            }
+        for (PowerUp powerUp : mPowerupList) {
+            powerUp.update(frameDelta);
         }
     }
 
+    /**
+     * Draws the world.
+     */
     public void draw() {
-        // If the draw happens faster than update, we don't
-        // need to repopulate the buffers...
+        // Each world element adds triangles to the shape buffer.  No OpenGl calls are made
+        // until after the whole scene has been added to the shape buffer.
         mShapeBuffer.clear();
         mBackground.draw(mShapeBuffer);
-        for (int i = 0; i < mWallList.length; i++) {
-            mWallList[i].draw(mShapeBuffer);
+        for (WallSegment wall : mWallList) {
+            wall.draw(mShapeBuffer);
         }
-        for (int i = 0; i < mPowerupList.length; i++) {
-            mPowerupList[i].draw(mShapeBuffer);
+        for (PowerUp powerUp : mPowerupList) {
+            powerUp.draw(mShapeBuffer);
         }
 
         mExplosions.draw(mShapeBuffer);
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (mPlayerList[i].isActive) {
-                mPlayerList[i].draw(mShapeBuffer);
+        for (Spaceship player : mPlayerList) {
+            if (player.isActive()) {
+                player.draw(mShapeBuffer);
             }
         }
         // Draw shots above everything else.
         mShots.draw(mShapeBuffer);
 
-        CameraMode cameraMode = CameraMode.SPLIT_SCREEN;
+        // Prepare for rendering to the screen.
+        updateViewportAndProjection();
 
-        if (cameraMode == CameraMode.SPLIT_SCREEN) {
-            // Indirection needed because numberofcameras is not always number of active players.
-            int numberOfCameras = mCameraLocations[getActivePlayerCount()].length;
+        // Send the triangles to OpenGl.
+        mShapeBuffer.draw(mMVPMatrix);
+    }
 
-            for (int i = 0; i < numberOfCameras; i++) {
-                float scale = 1;
-                float cameraX = 0;
-                float cameraY = 0;
+    /**
+     * Builds the static map, including walls and obstacles.
+     */
+    protected void buildMap() {
+        // The origin of the map coordinate system.
+        final int mapCenterX = 0;
+        final int mapCenterY = 0;
 
-                Spaceship targetShip = getPlayerByNumber(i);
+        final int mapTopWallCenterY = MAP_TOP_COORDINATE + MAP_WALL_THICKNESS / 2;
+        final int mapBottomWallCenterY = MAP_BOTTOM_COORDINATE - MAP_WALL_THICKNESS / 2;
+        final int mapRightWallCenterX = MAP_RIGHT_COORDINATE + MAP_WALL_THICKNESS / 2;
+        final int mapLeftWallCenterX = MAP_LEFT_COORDINATE - MAP_WALL_THICKNESS / 2;
 
-                if (targetShip != null && targetShip.isActive) {
-                    cameraX = targetShip.cameraX;
-                    cameraY = targetShip.cameraY;
-                    scale = 2;
-                }
+        final int rectangleShortEdgeLength = 20;
+        final int rectangleLongEdgeLength = 60;
 
+        final int squareEdgeLength = 20;
 
-                GLES20.glViewport(
-                        (int) (mCameraLocations[numberOfCameras][i].x * mWindowWidth),
-                        (int) (mCameraLocations[numberOfCameras][i].y * mWindowHeight),
-                        (int) (mCameraLocations[numberOfCameras][i].width * mWindowWidth),
-                        (int) (mCameraLocations[numberOfCameras][i].height * mWindowHeight));
+        mWallList = new WallSegment[]{
+                // Rectangles:
+                // Rectangle touching top edge.
+                new WallSegment(
+                        mapCenterX + 40,
+                        WORLD_TOP_COORDINATE - rectangleLongEdgeLength / 2,
+                        rectangleShortEdgeLength,
+                        rectangleLongEdgeLength),
+                // Rectangle touching bottom edge.
+                new WallSegment(
+                        mapCenterX - 40,
+                        WORLD_BOTTOM_COORDINATE + rectangleLongEdgeLength / 2,
+                        rectangleShortEdgeLength,
+                        rectangleLongEdgeLength),
+                // Rectangle in center of map.
+                new WallSegment(
+                        mapCenterX,
+                        mapCenterY,
+                        rectangleLongEdgeLength,
+                        rectangleShortEdgeLength),
 
-                float ratio = (float) (mWindowWidth * mCameraLocations[numberOfCameras][i].width)
-                        / (mWindowHeight * mCameraLocations[numberOfCameras][i].height);
+                // Squares: one in each quadrant of the map.
+                // Square in lower right.
+                new WallSegment(
+                        mapCenterX + 80,
+                        mapCenterY - 50,
+                        squareEdgeLength, squareEdgeLength),
+                // Square in upper left.
+                new WallSegment(
+                        mapCenterX - 80,
+                        mapCenterY + 50,
+                        squareEdgeLength,
+                        squareEdgeLength),
+                // Square in upper right.
+                new WallSegment(
+                        mapCenterX + 110,
+                        mapCenterY + 30,
+                        squareEdgeLength,
+                        squareEdgeLength),
+                // Square in lower left.
+                new WallSegment(
+                        mapCenterX - 110,
+                        mapCenterY - 30,
+                        squareEdgeLength,
+                        squareEdgeLength),
 
-                Matrix.orthoM(mProjMatrix, 0, -100 * ratio, 100 * ratio, -100, 100, -1, 1);
+                // Walls: around the edge of the map.
+                // Top
+                new WallSegment(
+                        mapCenterX,
+                        mapTopWallCenterY,
+                        WORLD_WIDTH,
+                        MAP_WALL_THICKNESS),
+                // Bottom
+                new WallSegment(
+                        mapCenterX,
+                        mapBottomWallCenterY,
+                        WORLD_WIDTH,
+                        MAP_WALL_THICKNESS),
+                // Right
+                new WallSegment(
+                        mapRightWallCenterX,
+                        mapCenterY, MAP_WALL_THICKNESS,
+                        WORLD_HEIGHT),
+                // Left
+                new WallSegment(
+                        mapLeftWallCenterX,
+                        mapCenterY,
+                        MAP_WALL_THICKNESS,
+                        WORLD_HEIGHT),
+        };
+    }
 
-                Matrix.setIdentityM(mMVPMatrix, 0);
-                Matrix.scaleM(mMVPMatrix, 0, scale, scale, 1);
-                Matrix.translateM(mMVPMatrix, 0, -cameraX, -cameraY, 0);
-
-                mShapeBuffer.draw(mProjMatrix, mMVPMatrix);
-            }
-        } else if (cameraMode == CameraMode.SHARED_SCREEN) {
-            GLES20.glViewport(0, 0, (int) mWindowWidth, (int) mWindowHeight);
-            float ratio = (float) mWindowWidth / mWindowHeight;
-
-            // This projection matrix is applied to object coordinates
-            // in the onDrawFrame() method
-            //Matrix.frustumM(mProjMatrix, 0, -ratio, ratio, -1, 1, 3, 7);
-            mShapeBuffer.draw(mProjMatrix, mMVPMatrix);
+    /**
+     * Computes the view projections and sets the OpenGl viewport.
+     */
+    protected void updateViewportAndProjection() {
+        // Assume a square viewport if the width and height haven't been initialized.
+        float viewportAspectRatio = 1.0f;
+        if ((mWindowWidth > 0) && (mWindowHeight > 0)) {
+            viewportAspectRatio = (float) mWindowWidth / (float) mWindowHeight;
         }
-    }
+        float viewportWidth = (float) mWindowWidth;
+        float viewportHeight = (float) mWindowHeight;
+        float viewportOffsetX = 0.0f;
+        float viewportOffsetY = 0.0f;
 
-    public int getActivePlayerCount() {
-        int count = 0;
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (mPlayerList[i].isActive) {
-                count++;
-            }
+        if (WORLD_ASPECT_RATIO > viewportAspectRatio) {
+            // Our window is taller than the ideal aspect ratio needed to accommodate the world
+            // without stretching.
+            // Reduce the viewport height to match the aspect ratio of the world.  The world
+            // will fill the whole width of the screen, but have some empty space on the top and
+            // bottom of the screen.
+            viewportHeight = viewportWidth / WORLD_ASPECT_RATIO;
+            // Center the viewport on the screen.
+            viewportOffsetY = ((float) mWindowHeight - viewportHeight) / 2.0f;
+        } else if (viewportAspectRatio > WORLD_ASPECT_RATIO) {
+            // Our window is wider than the ideal aspect ratio needed to accommodate the world
+            // without stretching.
+            // Reduce the viewport width to match the aspect ratio of the world.  The world
+            // will fill the whole height of the screen, but have some empty space on the
+            // left and right of the screen.
+            viewportWidth = viewportHeight * WORLD_ASPECT_RATIO;
+            // Center the viewport on the screen.
+            viewportOffsetX = ((float) mWindowWidth - viewportWidth) / 2.0f;
         }
-        return count;
+
+        Matrix.orthoM(mMVPMatrix, 0,
+                WORLD_LEFT_COORDINATE,
+                WORLD_RIGHT_COORDINATE,
+                WORLD_BOTTOM_COORDINATE,
+                WORLD_TOP_COORDINATE,
+                WORLD_NEAR_PLANE,
+                WORLD_FAR_PLANE);
+        GLES20.glViewport((int) viewportOffsetX, (int) viewportOffsetY,
+                (int) viewportWidth, (int) viewportHeight);
     }
 
-    public Spaceship getPlayerByNumber(int n) {
-        // Returns the nth player, or null if there isn't one.
-        if (n >= 0 && n < MAX_PLAYERS) {
-            return mPlayerList[n];
-        } else {
-            return null;
+    /**
+     * Prepares the game for a new match.
+     *
+     * @param winningPlayer - The winning ship from the last match.
+     */
+    private void endMatch(Spaceship winningPlayer) {
+        Utils.logDebug("Match over! - Player " + winningPlayer.getPlayerId()
+                + " has " + winningPlayer.getScore() + " points!");
+
+        // Reset the score for each ship.
+        for (Spaceship player : mPlayerList) {
+            player.resetAtEndOfMatch(winningPlayer.getPlayerId());
         }
-    }
 
-    @Override
-    public void onInputDeviceAdded(int arg0) {
-        Log.d("GameControllerSample", "Device added: " + arg0);
-    }
-
-    @Override
-    public void onInputDeviceChanged(int arg0) {
-        Log.d("GameControllerSample", "Device changed: " + arg0);
-    }
-
-    @Override
-    public void onInputDeviceRemoved(int arg0) {
-        Log.d("GameControllerSample", "Device removed: " + arg0);
-        for (int i = 0; i < MAX_PLAYERS; i++) {
-            if (mPlayerList[i].isActive && mPlayerList[i].deviceId == arg0) {
-                Log.i("GameControllerSample", "Deactivated player: " + i);
-                mPlayerList[i].deactivateShip();
-            }
-        }
-    }
-
-    enum CameraMode {
-        SHARED_SCREEN,
-        SPLIT_SCREEN
-    }
-
-    class ViewportLocation {
-        float x, y;
-        float width, height;
-
-        ViewportLocation(float x, float y, float width, float height) {
-            this.x = x;
-            this.y = y;
-            this.width = width;
-            this.height = height;
-        }
+        // Set the background color to the winning player's color until the next
+        // match starts.
+        mBackground.flashWinningColor(winningPlayer.getColor());
     }
 }
