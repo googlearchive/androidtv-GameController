@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 The Android Open Source Project
+ * Copyright 2014 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,55 +19,73 @@ package com.google.fpl.gamecontroller;
 import com.google.fpl.gamecontroller.particles.BaseParticle;
 
 /**
- * Handles drawing and collosion-detection with map walls.
+ * Handles drawing and collision-detection with map walls.
  */
 public class WallSegment {
-    private static final float[] WALL_SHAPE = {
-            1, 1,
-            -1, 1,
-            1, -1,
-            -1, -1
-    };
-    private float mCenterX, mCenterY;
-    private float mWidth, mHeight;
+    private static final Utils.Color WALL_COLOR = Utils.Color.WHITE;
+    private static final int EDGE_COUNT = 4;
 
-    private static final Utils.Color WALL_COLOR = new Utils.Color(1.0f, 1.0f, 1.0f, 1.0f);
+    private final float mCenterX, mCenterY;
+    private final float mWidth, mHeight;
+
+    // The center points (x, y) for each edge of the wall.
+    private final float[] mEdgeCenters = new float[EDGE_COUNT * 2];
+    // The scale values (x, y) for each edge of the wall.
+    private final float[] mEdgeScales = new float[EDGE_COUNT * 2];
 
     public WallSegment(float x, float y, float width, float height) {
         mCenterX = x;
         mCenterY = y;
         mWidth = width;
         mHeight = height;
+
+        // Compute the center and scale needed to draw lines along each edge of the wall.
+        int edgeIndex = 0;
+
+        // Left edge.
+        mEdgeCenters[edgeIndex + 0] = mCenterX - mWidth / 2.0f;
+        mEdgeCenters[edgeIndex + 1] = mCenterY;
+        mEdgeScales[edgeIndex + 0] = 1.0f + mHeight / 2.0f;
+        mEdgeScales[edgeIndex + 1] = 1.0f;
+        edgeIndex += 2;
+
+        // Right edge.
+        mEdgeCenters[edgeIndex + 0] = mCenterX + mWidth / 2.0f;
+        mEdgeCenters[edgeIndex + 1] = mCenterY;
+        mEdgeScales[edgeIndex + 0] = 1.0f + mHeight / 2.0f;
+        mEdgeScales[edgeIndex + 1] = 1.0f;
+        edgeIndex += 2;
+
+        // Bottom edge.
+        mEdgeCenters[edgeIndex + 0] = mCenterX;
+        mEdgeCenters[edgeIndex + 1] = mCenterY - mHeight / 2.0f;
+        mEdgeScales[edgeIndex + 0] = 1.0f;
+        mEdgeScales[edgeIndex + 1] = 1.0f + mWidth / 2.0f;
+        edgeIndex += 2;
+
+        // Top edge.
+        mEdgeCenters[edgeIndex + 0] = mCenterX;
+        mEdgeCenters[edgeIndex + 1] = mCenterY + mHeight / 2.0f;
+        mEdgeScales[edgeIndex + 0] = 1.0f;
+        mEdgeScales[edgeIndex + 1] = 1.0f + mWidth / 2.0f;
     }
 
     public void draw(ShapeBuffer sb) {
-        float r = 1.0f;
-        float g = 1.0f;
-        float b = 1.0f;
-
-        sb.addShape(mCenterX - mWidth / 2, mCenterY,
-                WALL_COLOR,
-                WALL_SHAPE,
-                1 + mHeight / 2, 1,
-                0, 1);
-        sb.addShape(mCenterX + mWidth / 2, mCenterY,
-                WALL_COLOR,
-                WALL_SHAPE,
-                1 + mHeight / 2, 1,
-                0, 1);
-
-        sb.addShape(mCenterX, mCenterY - mHeight / 2,
-                WALL_COLOR,
-                WALL_SHAPE,
-                1, 1 + mWidth / 2,
-                0, 1);
-        sb.addShape(mCenterX, mCenterY + mHeight / 2,
-                WALL_COLOR,
-                WALL_SHAPE,
-                1, 1 + mWidth / 2,
-                0, 1);
+        // Draw a line along each edge of the wall.
+        for (int i = 0; i < EDGE_COUNT; ++i) {
+            final int edgeIndex = i * 2;
+            sb.add2DShape(
+                    mEdgeCenters[edgeIndex + 0], mEdgeCenters[edgeIndex + 1],   // position
+                    WALL_COLOR,                                                 // color
+                    Utils.SQUARE_SHAPE,                                         // vertices
+                    mEdgeScales[edgeIndex + 0], mEdgeScales[edgeIndex + 1],     // scale
+                    0.0f, 1.0f);                                                // heading
+        }
     }
 
+    /**
+     * Returns true if the given point is inside this wall.
+     */
     public boolean isInWall(float x, float y) {
         return x >= mCenterX - mWidth / 2
                 && x <= mCenterX + mWidth / 2
@@ -75,52 +93,62 @@ public class WallSegment {
                 && y <= mCenterY + mHeight / 2;
     }
 
+    /**
+     * Checks for collisions with this wall.
+     */
     public void update(float timeFactor) {
         GameState gameState = GameState.getInstance();
 
-        BaseParticle[] possibleHits = gameState.mShots.getPotentialCollisions(mCenterX, mCenterY,
-                mWidth, mHeight);
+        // First, check for collisions with bullets.
+        BaseParticle[] possibleHits = gameState.getShots().getPotentialCollisions(mCenterX,
+                mCenterY, mWidth, mHeight);
 
-        BaseParticle currentParticle;
+        BaseParticle currentBullet;
+        // The possibleHits array will likely be longer than the number of entries returned.
+        // Look for a null entry to indicate the end of the list.
         for (int i = 0; possibleHits[i] != null; i++) {
-            currentParticle = possibleHits[i];
-            if (isInWall(currentParticle.x, currentParticle.y)) {
-                // Semi-hacky bit to zero in on the collision point here
-                // because it's faster to write than actual line intercept math
-                // and I just want to make sure it makes rocket launchers cool again.
+            currentBullet = possibleHits[i];
+            if (isInWall(currentBullet.getPositionX(), currentBullet.getPositionY())) {
+                // Semi-hacky way to zero in on the collision point.
+                // When we detect a bullet is inside the wall, iterate backwards and forwards
+                // along the trajectory of the bullet by smaller and smaller steps.
+                // This should get us fairly close to the intersection point.
+                //
+                // For better collision detection, we could compute the actual line
+                // intersection point, instead of just approximating it.
                 float stepSize = -0.5f;
-                for (int j = 0; j < 3; j++) {
-                    currentParticle.x += currentParticle.deltaX * stepSize;
-                    currentParticle.y += currentParticle.deltaY * stepSize;
-                    if (isInWall(currentParticle.x, currentParticle.y)) {
+                for (int j = 0; j < 3; ++j) {
+                    currentBullet.incrementPosition(stepSize);
+                    if (isInWall(currentBullet.getPositionX(), currentBullet.getPositionY())) {
                         stepSize = -Math.abs(stepSize) * 0.5f;
                     } else {
                         stepSize = Math.abs(stepSize) * 0.5f;
                     }
                 }
-                currentParticle.collision();
+                currentBullet.handleCollision();
             }
         }
 
-        for (int i = 0; i < gameState.mPlayerList.length; i++) {
-            Spaceship currentPlayer = gameState.mPlayerList[i];
-            if (currentPlayer.isActive && isInWall(currentPlayer.x, currentPlayer.y)) {
-                float xx = (currentPlayer.x - mCenterX) * mHeight;
-                float yy = (currentPlayer.y - mCenterY) * mWidth;
+        // Now check for ship-wall collisions.
+        for (Spaceship currentPlayer : gameState.getPlayerList()) {
+            if (currentPlayer.isActive()
+                    && isInWall(currentPlayer.getPositionX(), currentPlayer.getPositionY())) {
+                float xx = (currentPlayer.getPositionX() - mCenterX) * mHeight;
+                float yy = (currentPlayer.getPositionY() - mCenterY) * mWidth;
 
-                float fudge = 0.1f;
+                float epsilon = 0.1f;
 
                 if (Math.abs(xx) > Math.abs(yy)) {
                     if (xx >= 0) {
-                        currentPlayer.x = mCenterX + mWidth / 2 + fudge;
+                        currentPlayer.setPositionX(mCenterX + mWidth / 2 + epsilon);
                     } else {
-                        currentPlayer.x = mCenterX - mWidth / 2 - fudge;
+                        currentPlayer.setPositionX(mCenterX - mWidth / 2 - epsilon);
                     }
                 } else {
                     if (yy >= 0) {
-                        currentPlayer.y = mCenterY + mHeight / 2 + fudge;
+                        currentPlayer.setPositionY(mCenterY + mHeight / 2 + epsilon);
                     } else {
-                        currentPlayer.y = mCenterY - mHeight / 2 - fudge;
+                        currentPlayer.setPositionY(mCenterY - mHeight / 2 - epsilon);
                     }
                 }
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 The Android Open Source Project
+ * Copyright 2014 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 
 package com.google.fpl.gamecontroller;
 
+import android.graphics.PointF;
+import android.graphics.RectF;
 import android.util.Log;
 
 /**
@@ -28,11 +30,26 @@ public class Utils {
     private static final String LOG_TAG = "GameControllerSample";
 
     /**
+     * The 2D vertex positions for a square centered around the origin.
+     *
+     * The vertices are ordered so that one triangle strip can be used to render
+     * the square.
+     *
+     * Using scaling and rotation, these vertices can be used to render any rectangular shape.
+     */
+    public static final float[] SQUARE_SHAPE = {
+             1.0f,  1.0f,
+            -1.0f,  1.0f,
+             1.0f, -1.0f,
+            -1.0f, -1.0f
+    };
+
+    /**
      * Prints debugging messages to the console.
      *
      * Disabled for non-debug builds.
      *
-     * @param message - The message to print to the console.
+     * @param message The message to print to the console.
      */
     public static void logDebug(String message) {
         if (BuildConfig.DEBUG) {
@@ -45,7 +62,7 @@ public class Utils {
      *
      * Disabled for non-debug builds.
      *
-     * @param message - The message to print to the console.
+     * @param message The message to print to the console.
      */
     public static void logError(String message) {
         if (BuildConfig.DEBUG) {
@@ -67,12 +84,99 @@ public class Utils {
     }
 
     /**
+     * Returns a randomly chosen point inside the given rectangle.
+     *
+     * @param rect a rectangle bounding the location for the point.
+     * @return a new PointF object.
+     */
+    public static PointF randPointInRect(RectF rect) {
+        float x = randFloatInRange(rect.left, rect.right);
+        float y = randFloatInRange(rect.bottom, rect.top);
+
+        return new PointF(x, y);
+    }
+
+    /**
+     * Computes a randomly chosen direction vector.
+     *
+     * @return a new PointF object that is a normalized direction vector.
+     */
+    public static PointF randDirectionVector() {
+        // Pick a random point in a square centered about the origin.
+        PointF direction = randPointInRect(new RectF(-1.0f, 1.0f, 1.0f, -1.0f));
+
+        // Turn the chosen point into a direction vector by normalizing it.
+        normalizeDirectionVector(direction);
+
+        return direction;
+    }
+
+    /**
+     * Normalizes the given direction vector.
+     *
+     * Changes the length of the given vector so that it is "1".  If the given direction
+     * already has a length of "0", the direction will be set to "(1, 0)".
+     *
+     * @param direction the direction to normalize.
+     */
+    public static void normalizeDirectionVector(PointF direction) {
+        float length = direction.length();
+        if (length == 0.0f) {
+            direction.set(1.0f, 0.0f);
+        } else {
+            direction.x /= length;
+            direction.y /= length;
+        }
+    }
+
+    /**
+     * Determines the squared length of the given 2-component vector.
+     *
+     * @param x the x component of the vector.
+     * @param y the y component of the vector.
+     * @return the squared length of the vector.
+     */
+    public static float vector2DLengthSquared(float x, float y) {
+        return x * x + y * y;
+    }
+
+    /**
+     * Determines the length of the given 2-component vector.
+     *
+     * @param x the x component of the vector.
+     * @param y the y component of the vector.
+     * @return the length of the vector.
+     */
+    public static float vector2DLength(float x, float y) {
+        return (float) Math.sqrt(vector2DLengthSquared(x, y));
+    }
+
+    /**
+     * Computes the distance between two 2-d points.
+     *
+     * @param x1 x position of the first point.
+     * @param y1 y position of the first point.
+     * @param x2 x position of the second point.
+     * @param y2 y position of the second point.
+     * @return the distance between the two points.
+     */
+    public static float distanceBetweenPoints(float x1, float y1, float x2, float y2) {
+        float xSquared = (x2 - x1);
+        xSquared *= xSquared;
+
+        float ySquared = (y2 - y1);
+        ySquared *= ySquared;
+
+        return (float) Math.sqrt(xSquared + ySquared);
+    }
+
+    /**
      * Ensures that the given value falls within the given range.
      *
-     * @param value - The value to clamp.
-     * @param min - The lower bound of the range.
-     * @param max - The upper bound of the range.
-     * @return - The clamped value.
+     * @param value The value to clamp.
+     * @param min The lower bound of the range.
+     * @param max The upper bound of the range.
+     * @return The clamped value.
      */
     public static float clamp(float value, float min, float max) {
         return Math.max(min, Math.min(max, value));
@@ -80,10 +184,10 @@ public class Utils {
     /**
      * Ensures that the given value falls within the given range.
      *
-     * @param value - The value to clamp.
-     * @param min - The lower bound of the range.
-     * @param max - The upper bound of the range.
-     * @return - The clamped value.
+     * @param value The value to clamp.
+     * @param min The lower bound of the range.
+     * @param max The upper bound of the range.
+     * @return The clamped value.
      */
     public static float clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
@@ -133,9 +237,9 @@ public class Utils {
          * Converts a floating point color value in the range [0..1] to an integer in the
          * range [0..255].
          *
-         * @param normalizedColor - A number in the range 0 to 1, inclusive.  No range-checking
+         * @param normalizedColor A number in the range 0 to 1, inclusive.  No range-checking
          *                        is performed.
-         * @return - An int in the range 0 to 255, inclusive.
+         * @return An int in the range 0 to 255, inclusive.
          */
         private static int normalizedColorToInt(float normalizedColor) {
             return (int) (255.0f * normalizedColor);
@@ -144,9 +248,9 @@ public class Utils {
          * Converts an integer color value in the range [0..255] to floating point number in the
          * range [0..1].
          *
-         * @param intColor - A number in the range 0 to 255, inclusive.  No range-checking
+         * @param intColor A number in the range 0 to 255, inclusive.  No range-checking
          *                        is performed.
-         * @return - A float in the range 0 to 1, inclusive.
+         * @return A float in the range 0 to 1, inclusive.
          */
         private static float intColorToNormalized(int intColor) {
             return (float) intColor / 255.0f;
@@ -226,7 +330,7 @@ public class Utils {
         /**
          * Returns a packed integer representation of this color.
          *
-         * @return - The 32-bit packed color, with 8 bits per components.  Alpha is in the
+         * @return The 32-bit packed color, with 8 bits per components.  Alpha is in the
          * high-order bits, then blue, then green, and then red in the low-order bits.
          */
         public int getPackedABGR() {
@@ -295,7 +399,7 @@ public class Utils {
          *
          * The alpha component of the color remains unchanged.
          *
-         * @param factor - A value in the range 0..1, inclusive, to indicate how much darkening
+         * @param factor A value in the range 0..1, inclusive, to indicate how much darkening
          *               to apply.  0 sets the color to black, and 1 leaves the color unchanged.
          *               Values outside of this range have undefined results.
          */
@@ -309,9 +413,9 @@ public class Utils {
          * The interpolated color is created by linearly interpolating each component
          * of the two given colors.
          *
-         * @param colorA - The first color to mix.
-         * @param colorB - The second color to mix.
-         * @param factor - A value between 0 and 1.  A value of "0" will set this color to
+         * @param colorA The first color to mix.
+         * @param colorB The second color to mix.
+         * @param factor A value between 0 and 1.  A value of "0" will set this color to
          *               colorA, and a value of "1" will set this color to colorB.
          */
         public void setToLerp(Color colorA, Color colorB, float factor) {

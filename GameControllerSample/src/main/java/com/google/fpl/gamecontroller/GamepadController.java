@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 The Android Open Source Project
+ * Copyright 2014 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 
 package com.google.fpl.gamecontroller;
 
-import android.view.InputEvent;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
@@ -48,11 +47,11 @@ public class GamepadController {
     protected static final int FRAME_INDEX_COUNT = 2;
 
     // Positions of the two joysticks.
-    protected final float mJoystickPositions[][];
+    private final float mJoystickPositions[][];
     // The button states for the current and previous frames.
-    protected final boolean mButtonState[][];
+    private final boolean mButtonState[][];
     // The device that we are tuned to.
-    protected int mDeviceId = -1;
+    private int mDeviceId = -1;
 
     public GamepadController() {
         mButtonState = new boolean[BUTTON_COUNT][FRAME_INDEX_COUNT];
@@ -87,7 +86,7 @@ public class GamepadController {
     /**
      * Sets the physical device id for this controller.
      *
-     * @param newId - The physical device id, or -1 to indicate no assigned physical device.
+     * @param newId The physical device id, or -1 to indicate no assigned physical device.
      */
     public void setDeviceId(int newId) {
         if (newId != mDeviceId) {
@@ -108,8 +107,8 @@ public class GamepadController {
     /**
      * Returns the position of a joystick along a single axis.
      *
-     * @param joystickIndex - One of: JOYSTICK_1 or JOYSTICK_2.
-     * @param axis - One of: AXIS_X or AXIS_Y.
+     * @param joystickIndex One of: JOYSTICK_1 or JOYSTICK_2.
+     * @param axis One of: AXIS_X or AXIS_Y.
      * @return A value in the range -1 to 1, inclusive, where 0 represents the joystick's
      *          center position.
      */
@@ -120,7 +119,7 @@ public class GamepadController {
     /**
      * Returns true if the given button is currently pressed.
      *
-     * @param buttonId - One of: BUTTON_A, BUTTON_B, BUTTON_X, or BUTTON_Y.
+     * @param buttonId One of: BUTTON_A, BUTTON_B, BUTTON_X, or BUTTON_Y.
      * @return true if the given button is currently pressed.
      */
     public boolean isButtonDown(int buttonId) {
@@ -130,7 +129,7 @@ public class GamepadController {
     /**
      * Returns true if a button is down now, but wasn't last frame.
      *
-     * @param buttonId - One of: BUTTON_A, BUTTON_B, BUTTON_X, or BUTTON_Y.
+     * @param buttonId One of: BUTTON_A, BUTTON_B, BUTTON_X, or BUTTON_Y.
      * @return true if a button is down now, but wasn't last frame.
      */
     public boolean wasButtonPressed(int buttonId) {
@@ -142,7 +141,7 @@ public class GamepadController {
     /**
      * Returns true if it's up now, but wasn't last frame.
      *
-     * @param buttonId - One of: BUTTON_A, BUTTON_B, BUTTON_X, or BUTTON_Y.
+     * @param buttonId One of: BUTTON_A, BUTTON_B, BUTTON_X, or BUTTON_Y.
      * @return true if it's up now, but wasn't last frame.
      */
     public boolean wasButtonReleased(int buttonId) {
@@ -163,37 +162,32 @@ public class GamepadController {
     }
 
     /**
-     * Updates the tracked state values of this controller in response to an input event.
-     *
-     * @param event - A MotionEvent or KeyEvent from a game controller.  Other event types
-     *              are ignored.
+     * Updates the tracked state values of this controller in response to a motion input event.
      */
-    public void handleInputEvent(InputEvent event) {
-        if (event instanceof MotionEvent) {
-            MotionEvent motionEvent = (MotionEvent) event;
+    public void handleMotionEvent(MotionEvent motionEvent) {
+        mJoystickPositions[JOYSTICK_1][AXIS_X] = motionEvent.getAxisValue(MotionEvent.AXIS_X);
+        mJoystickPositions[JOYSTICK_1][AXIS_Y] = motionEvent.getAxisValue(MotionEvent.AXIS_Y);
 
-            mJoystickPositions[JOYSTICK_1][AXIS_X] = motionEvent.getAxisValue(MotionEvent.AXIS_X);
-            mJoystickPositions[JOYSTICK_1][AXIS_Y] = motionEvent.getAxisValue(MotionEvent.AXIS_Y);
+        // The X and Y axes of the second joystick on a controller are mapped to the
+        // MotionEvent AXIS_Z and AXIS_RZ values, respectively.
+        mJoystickPositions[JOYSTICK_2][AXIS_X] = motionEvent.getAxisValue(MotionEvent.AXIS_Z);
+        mJoystickPositions[JOYSTICK_2][AXIS_Y] = motionEvent.getAxisValue(MotionEvent.AXIS_RZ);
+    }
 
-            // The X and Y axes of the second joystick on a controller are mapped to the
-            // MotionEvent AXIS_Z and AXIS_RZ values, respectively.
-            mJoystickPositions[JOYSTICK_2][AXIS_X] = motionEvent.getAxisValue(MotionEvent.AXIS_Z);
-            mJoystickPositions[JOYSTICK_2][AXIS_Y] = motionEvent.getAxisValue(MotionEvent.AXIS_RZ);
-        } else if (event instanceof KeyEvent) {
-            KeyEvent keyEvent = (KeyEvent) event;
-            boolean keyIsDown = keyEvent.getAction() == KeyEvent.ACTION_DOWN;
+    /**
+     * Updates the tracked state values of this controller in response to a key input event.
+     */
+    public void handleKeyEvent(KeyEvent keyEvent) {
+        boolean keyIsDown = keyEvent.getAction() == KeyEvent.ACTION_DOWN;
 
-            if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_A) {
-                mButtonState[BUTTON_A][FRAME_INDEX_CURRENT] = keyIsDown;
-            } else if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_B) {
-                mButtonState[BUTTON_B][FRAME_INDEX_CURRENT] = keyIsDown;
-            } else if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_X) {
-                mButtonState[BUTTON_X][FRAME_INDEX_CURRENT] = keyIsDown;
-            } else if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
-                mButtonState[BUTTON_Y][FRAME_INDEX_CURRENT] = keyIsDown;
-            }
-        } else {
-            Utils.logDebug("Unhandled input event.");
+        if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_A) {
+            mButtonState[BUTTON_A][FRAME_INDEX_CURRENT] = keyIsDown;
+        } else if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_B) {
+            mButtonState[BUTTON_B][FRAME_INDEX_CURRENT] = keyIsDown;
+        } else if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_X) {
+            mButtonState[BUTTON_X][FRAME_INDEX_CURRENT] = keyIsDown;
+        } else if (keyEvent.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
+            mButtonState[BUTTON_Y][FRAME_INDEX_CURRENT] = keyIsDown;
         }
     }
 }

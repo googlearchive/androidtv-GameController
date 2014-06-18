@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 The Android Open Source Project
+ * Copyright 2014 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,9 +25,11 @@ import android.opengl.GLSurfaceView.Renderer;
 import android.opengl.Matrix;
 import android.view.InputDevice;
 import android.view.InputEvent;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 
-import com.google.fpl.gamecontroller.particles.Background;
-import com.google.fpl.gamecontroller.particles.ParticleGlitter;
+import com.google.fpl.gamecontroller.particles.BackgroundParticleSystem;
+import com.google.fpl.gamecontroller.particles.ParticleSystem;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -39,6 +41,12 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
 
     // The "world" is everything that is visible on the screen.  The world extends to the outside
     // edges of the walls that surround the world.
+    //
+    // These dimensions are somewhat arbitrary, and were chosen because they match the 16:9
+    // aspect ratio of many tablets and TVs.  The world dimensions do not map directly to pixels
+    // on the screen.  During rendering, the world is scaled so that it takes up as much of the
+    // screen as possible, but still maintains the 16:9 aspect ratio.  For displays with different
+    // aspect ratios, some portions of the display will be empty.
     public static final int WORLD_WIDTH = 1280 / 4;
     public static final int WORLD_HEIGHT = 720 / 4;
     // Define the rectangle that bounds the world.  The coordinate system used by the world
@@ -47,6 +55,10 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     public static final int WORLD_BOTTOM_COORDINATE = -WORLD_HEIGHT / 2;
     public static final int WORLD_LEFT_COORDINATE = -WORLD_WIDTH / 2;
     public static final int WORLD_RIGHT_COORDINATE = WORLD_WIDTH / 2;
+
+    // Player's ships are identified with positive integers.  This value indicates an invalid
+    // or unassigned player.
+    public static final int INVALID_PLAYER_ID = -1;
 
     // Mapping for Z values when projected into the world.
     private static final float WORLD_NEAR_PLANE = -1.0f;
@@ -93,10 +105,18 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     // The number of points a player must score to win a match.
     private static final int POINTS_PER_MATCH = 5;
 
+    // Every particle needs to be checked every frame, even if it is not active.
+    // Therefore, it is best for performance to not over-allocate particles.
+    // Running out of background or explosion particles doesn't affect game play at all,
+    // is likely to go unnoticed by players.
+    private static final int MAX_EXPLOSION_PARTICLES = 2000;
+    private static final int MAX_BACKGROUND_PARTICLES = 400;
+    private static final int MAX_BULLET_PARTICLES = 500;
+
     // Singleton instance of the GameState.
     private static GameState sGameStateInstance = null;
 
-    // The combined model, view, and projection matrices.
+    // A 4x4 matrix that represents the combined model, view, and projection matrices.
     private final float[] mMVPMatrix = new float[16];
 
     // The window dimensions in pixels.
@@ -106,13 +126,13 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     private Spaceship[] mPlayerList;
 
     // The animated background particles.
-    private Background mBackground;
+    private BackgroundParticleSystem mBackgroundParticles;
 
     // Manages the shots fired by the ships.
-    private ParticleGlitter mShots;
+    private ParticleSystem mShots;
 
     // Manages explosion particles.
-    private ParticleGlitter mExplosions;
+    private ParticleSystem mExplosions;
 
     // The walls and other obstacles in the world.
     private WallSegment[] mWallList;
@@ -147,11 +167,25 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     }
 
     /**
+     * Determines if the given point is within the bounds of the world.
+     *
+     * @param x the x coordinate of the point.
+     * @param y the y coordinate of the point.
+     * @return true of the point is inside the world.
+     */
+    public static boolean inWorld(float x, float y) {
+        return x >= GameState.WORLD_LEFT_COORDINATE
+                && x <= GameState.WORLD_RIGHT_COORDINATE
+                && y >= GameState.WORLD_BOTTOM_COORDINATE
+                && y <= GameState.WORLD_TOP_COORDINATE;
+    }
+
+    /**
      * Set this class as renderer for this GLSurfaceView.
      * Request Focus and set if focusable in touch mode to
      * receive the Input from Screen
      *
-     * @param context - The Activity Context.
+     * @param context The Activity Context.
      */
     public GameState(Context context) {
         super(context);
@@ -175,11 +209,11 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
             mPowerupList[i] = new PowerUp();
         }
 
-        mBackground = new Background();
-        mExplosions = new ParticleGlitter();
+        mBackgroundParticles = new BackgroundParticleSystem(MAX_BACKGROUND_PARTICLES);
+        mExplosions = new ParticleSystem(MAX_EXPLOSION_PARTICLES, false);
 
         // The true here means we want collision tracking data.
-        mShots = new ParticleGlitter(true);
+        mShots = new ParticleSystem(MAX_BULLET_PARTICLES, true);
 
         mLastUpdateTimeMillis = System.currentTimeMillis();
 
@@ -212,14 +246,14 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
         }
     }
 
-    public ParticleGlitter getShots() {
+    public ParticleSystem getShots() {
         return mShots;
     }
-    public ParticleGlitter getExplosions() {
+    public ParticleSystem getExplosions() {
         return mExplosions;
     }
-    public Background getBackgroundParticles() {
-        return mBackground;
+    public BackgroundParticleSystem getBackgroundParticles() {
+        return mBackgroundParticles;
     }
     public Spaceship[] getPlayerList() {
         return mPlayerList;
@@ -231,6 +265,7 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     /**
      * The Surface is created/init()
      */
+    @Override
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
         // The ShapeBuffer creates OpenGl resources, so don't create it until after the
         // primary rendering surface has been created.
@@ -241,6 +276,7 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     /**
      * Here we do our drawing
      */
+    @Override
     public void onDrawFrame(GL10 unused) {
         // Clear the screen to black.
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -272,6 +308,7 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     /**
      * If the surface changes, reset the view size.
      */
+    @Override
     public void onSurfaceChanged(GL10 unused, int width, int height) {
         // Make sure the window dimensions are never 0.
         mWindowWidth = Math.max(width, 1);
@@ -283,7 +320,7 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
      *
      * Will end the match if the scoring player has enough points to win.
      *
-     * @param playerId - the id of the scoring player.
+     * @param playerId the id of the scoring player.
      */
     public void scorePoint(int playerId) {
         for (Spaceship player : mPlayerList) {
@@ -298,53 +335,43 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     }
 
     /**
-     * Handles game controller input.
+     * Handles motion (joystick) input events.
      *
-     * Events that do not come from game controllers are ignored.  Game controller events
-     * are routed to the correct player's controller object.
-     *
-     * @param event - The InputEvent to handle.
-     * @return - true if the event was handled.
+     * @param motionEvent The event to handle.
+     * @return true if the event was handled.
      */
-    public boolean handleInputEvent(InputEvent event) {
-        boolean wasHandled = false;
-
-        // getControllerNumber() will return "0" for devices that are not game controllers or
-        // joysticks.
-        int controllerNumber = InputDevice.getDevice(event.getDeviceId()).getControllerNumber() - 1;
-
-        if (CONTROLLER_DEBUG_PRINT) {
-            Utils.logDebug("----------------------------------------------");
-            Utils.logDebug("Input event: ");
-            Utils.logDebug("Source: " + event.getSource());
-            Utils.logDebug("isFromSource(gamepad): "
-                    + event.isFromSource(InputDevice.SOURCE_GAMEPAD));
-            Utils.logDebug("isFromSource(joystick): "
-                    + event.isFromSource(InputDevice.SOURCE_JOYSTICK));
-            Utils.logDebug("isFromSource(touch nav): "
-                    + event.isFromSource(InputDevice.SOURCE_TOUCH_NAVIGATION));
-            Utils.logDebug("Controller: " + controllerNumber);
-            Utils.logDebug("----------------------------------------------");
+    public boolean handleMotionEvent(MotionEvent motionEvent) {
+        Spaceship player = mapInputEventToShip(motionEvent);
+        if (player != null) {
+            player.getController().handleMotionEvent(motionEvent);
+            return true;
         }
+        return false;
+    }
 
-        if (controllerNumber >= 0 && controllerNumber < mPlayerList.length) {
-            mPlayerList[controllerNumber].makeActiveIfNotActive(event.getDeviceId());
-            mPlayerList[controllerNumber].getController().handleInputEvent(event);
-            wasHandled = true;
-        } else {
-            Utils.logDebug("Unhandled input event.");
+    /**
+     * Handles key input events.
+     *
+     * @param keyEvent The event to handle.
+     * @return true if the event was handled.
+     */
+    public boolean handleKeyEvent(KeyEvent keyEvent) {
+        Spaceship player = mapInputEventToShip(keyEvent);
+        if (player != null) {
+            player.getController().handleKeyEvent(keyEvent);
+            return true;
         }
-        return wasHandled;
+        return false;
     }
 
     /**
      * Update positions, animations, etc.
      *
-     * @param frameDelta - The amount of time (in "frame units") that has elapsed since the last
+     * @param frameDelta The amount of time (in "frame units") that has elapsed since the last
      *                   call to update().
      */
     public void update(float frameDelta) {
-        mBackground.update(frameDelta);
+        mBackgroundParticles.update(frameDelta);
         mExplosions.update(frameDelta);
         mShots.update(frameDelta);
 
@@ -370,7 +397,7 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
         // Each world element adds triangles to the shape buffer.  No OpenGl calls are made
         // until after the whole scene has been added to the shape buffer.
         mShapeBuffer.clear();
-        mBackground.draw(mShapeBuffer);
+        mBackgroundParticles.draw(mShapeBuffer);
         for (WallSegment wall : mWallList) {
             wall.draw(mShapeBuffer);
         }
@@ -397,7 +424,7 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     /**
      * Builds the static map, including walls and obstacles.
      */
-    protected void buildMap() {
+    private void buildMap() {
         // The origin of the map coordinate system.
         final int mapCenterX = 0;
         final int mapCenterY = 0;
@@ -488,7 +515,7 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     /**
      * Computes the view projections and sets the OpenGl viewport.
      */
-    protected void updateViewportAndProjection() {
+    private void updateViewportAndProjection() {
         // Assume a square viewport if the width and height haven't been initialized.
         float viewportAspectRatio = 1.0f;
         if ((mWindowWidth > 0) && (mWindowHeight > 0)) {
@@ -531,9 +558,46 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
     }
 
     /**
+     * Finds a player's Spaceship object that corresponds to a given input event.
+     *
+     * Events that do not come from game controllers are ignored.  If the event is from a new
+     * controller, the corresponding player's ship is activated.
+     *
+     * @param event The InputEvent to check.
+     * @return a player's ship or null if the event was not from a controller.
+     */
+    private Spaceship mapInputEventToShip(InputEvent event) {
+        // getControllerNumber() will return "0" for devices that are not game controllers or
+        // joysticks.
+        int controllerNumber = InputDevice.getDevice(event.getDeviceId()).getControllerNumber() - 1;
+
+        if (CONTROLLER_DEBUG_PRINT) {
+            Utils.logDebug("----------------------------------------------");
+            Utils.logDebug("Input event: ");
+            Utils.logDebug("Source: " + event.getSource());
+            Utils.logDebug("isFromSource(gamepad): "
+                    + event.isFromSource(InputDevice.SOURCE_GAMEPAD));
+            Utils.logDebug("isFromSource(joystick): "
+                    + event.isFromSource(InputDevice.SOURCE_JOYSTICK));
+            Utils.logDebug("isFromSource(touch nav): "
+                    + event.isFromSource(InputDevice.SOURCE_TOUCH_NAVIGATION));
+            Utils.logDebug("Controller: " + controllerNumber);
+            Utils.logDebug("----------------------------------------------");
+        }
+
+        if (controllerNumber >= 0 && controllerNumber < mPlayerList.length) {
+            // Bind the device to the player's controller.
+            mPlayerList[controllerNumber].getController().setDeviceId(event.getDeviceId());
+            return mPlayerList[controllerNumber];
+        }
+
+        return null;
+    }
+
+    /**
      * Prepares the game for a new match.
      *
-     * @param winningPlayer - The winning ship from the last match.
+     * @param winningPlayer The winning ship from the last match.
      */
     private void endMatch(Spaceship winningPlayer) {
         Utils.logDebug("Match over! - Player " + winningPlayer.getPlayerId()
@@ -546,6 +610,6 @@ public class GameState extends GLSurfaceView implements Renderer, InputDeviceLis
 
         // Set the background color to the winning player's color until the next
         // match starts.
-        mBackground.flashWinningColor(winningPlayer.getColor());
+        mBackgroundParticles.flashWinningColor(winningPlayer.getColor());
     }
 }

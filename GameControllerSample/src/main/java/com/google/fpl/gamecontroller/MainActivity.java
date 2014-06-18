@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 The Android Open Source Project
+ * Copyright 2014 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,34 +18,26 @@ package com.google.fpl.gamecontroller;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
 /**
  * Application entry point.
+ *
+ * Forwards events to its GameState object.
  */
 public class MainActivity extends Activity {
     /**
-     * Our own OpenGL View overridden
+     * Manages the OpenGl context and all game mechanics.
      */
     private GameState mGamestate;
 
-    private static boolean isJoystick(int source) {
-        return (source & InputDevice.SOURCE_JOYSTICK) != 0;
-    }
-
-    /**
-     * Initiate our @see Lesson09.java,
-     * which is GLSurfaceView and Renderer
-     */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        //Initiate our Lesson with this Activity Context handed over
         mGamestate = new GameState(this);
-        //Set the lesson as View to the Activity
+        // GameState is a GLSurfaceView.
         setContentView(mGamestate);
     }
 
@@ -63,16 +55,11 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent event) {
-        return mGamestate.handleInputEvent(event);
+        return mGamestate.handleMotionEvent(event);
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        // We only care about game controllers.
-        if (!isJoystick(event.getSource())) {
-            return super.dispatchKeyEvent(event);
-        }
-        mGamestate.handleInputEvent(event);
-        return true;
+        return mGamestate.handleKeyEvent(event);
     }
 }
