@@ -4,4 +4,3 @@ For other related samples, check out the new [github.com/android/tv][2] repo. Th
 
 [1]: https://help.github.com/en/articles/about-archiving-repositories
 [2]: https://github.com/android/tv
-
