@@ -1,18 +1,7 @@
-Build Instructions
--------------------
+This sample has been deprecated/archived meaning it's read-only and it's no longer actively maintained (more details on archiving can be found [here][1]).
 
-This sample uses the Gradle build system. To build this project, use the
-"gradlew build" command or use "Import Project" in Android Studio.
+For other related samples, check out the new [github.com/android/tv][2] repo. Thank you!
 
-To see a list of all available commands, run "gradlew tasks".
+[1]: https://help.github.com/en/articles/about-archiving-repositories
+[2]: https://github.com/android/tv
 
-Dependencies
--------------
-
-- Android SDK Build-tools v18.1
-- Android Support Repository v2
-
-Dependencies are available for download via the Android SDK Manager.
-
-Android Studio is available for download at:
-    http://developer.android.com/sdk/installing/studio.html
